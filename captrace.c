@@ -9,19 +9,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
-// Comm+pid can take up to TASK_COMM_LEN + len(PID_MAX_LIMIT) bytes, way fewer than this
-#define MAX_PROG_SIZE 255
-#define str(s) #s
-#define xstr(s) str(s)
-#define max(x,y) ((x) >= (y) ? (x) : (y))
+#include "captrace.h"
 
 static const char *KPROBE_DEF = "p:captrace ns_capable_common cap=%%si audit=%%dx\n";
 static const char *KPROBE_UNDEF = "-:captrace\n";
 static const char *KPROBE_FORMAT = " %" xstr(MAX_PROG_SIZE) "s %*s .... %*Lf : captrace: %*s cap=%" SCNx64 " audit=%" SCNx64 " ";
-static const char *tracefs_path = "/sys/kernel/debug/tracing";
-static int tracefs_fd = -1;
-static volatile int interrupted = 0;
 static const char* CAPABILITIES[] = {
     [0]  = "CAP_CHOWN",
     [1]  = "CAP_DAC_OVERRIDE",
@@ -60,9 +52,10 @@ static const char* CAPABILITIES[] = {
     [34] = "CAP_SYSLOG",
     [35] = "CAP_WAKE_ALARM",
     [36] = "CAP_BLOCK_SUSPEND",
-    [37] = "AUDIT_READ",
+    [37] = "CAP_AUDIT_READ",
 };
 static const size_t CAPABILITIES_COUNT = sizeof(CAPABILITIES)/sizeof(CAPABILITIES[0]);
+static volatile int interrupted = 0;
 
 void print_usage()
 {
@@ -89,7 +82,7 @@ void* safe_alloc(size_t bytes)
     if (res == NULL)
     {
         fprintf(stderr, "Error: out of memory\n");
-	exit(ENOMEM);
+        exit(ENOMEM);
     }
     return res;
 }
@@ -100,7 +93,7 @@ void* safe_realloc(void *old, size_t bytes)
     if (res == NULL)
     {
         fprintf(stderr, "Error: out of memory\n");
-	exit(ENOMEM);
+        exit(ENOMEM);
     }
     return res;
 }
@@ -111,14 +104,14 @@ int get_prog_path(uint64_t pid, char *buf, size_t buf_len)
     snprintf(procpath, sizeof(procpath), "/proc/%" PRIu64 "/exe", pid);
     ssize_t res_len = readlink(procpath, buf, buf_len);
     if (res_len == (ssize_t)buf_len)
-	return ENAMETOOLONG;
+        return ENAMETOOLONG;
     else if (res_len < 0)
-	return errno;
+        return errno;
     buf[res_len] = '\0';
     return 0;
 }
 
-int write_tracing(const char *path, const char *format, ...)
+int write_tracing(int tracefs_fd, const char *path, const char *format, ...)
 {
     int res = 0;
     int tmp_fd = -1;
@@ -130,9 +123,9 @@ int write_tracing(const char *path, const char *format, ...)
     tmp_fd = openat(tracefs_fd, path, O_WRONLY | O_TRUNC);
     if (tmp_fd < 0)
     {
-	res = errno;
+        res = errno;
         fprintf(stderr, "Error: openat(%s) code %d\n", path, res);
-	goto cleanup;
+        goto cleanup;
     }
 
     vsnprintf(buffer, sizeof(buffer), format, args);
@@ -142,17 +135,13 @@ int write_tracing(const char *path, const char *format, ...)
 cleanup:
     va_end(args);
     if (tmp_fd > 0)
-	close(tmp_fd);
+        close(tmp_fd);
     return res;
 }
 
-int main(int argc, char* argv[])
+int captrace(int tracefs_fd, uint64_t target_pid, int follow_forks, int verbose, int summarize)
 {
     int res = 0;
-    int follow_forks = 0;
-    int summarize = 0;
-    int verbose = 0;
-    uint64_t target = 0;
     uint64_t this_pid = getpid();
     size_t max_cap_len = 0;
     int pipe_fd = -1;
@@ -166,99 +155,57 @@ int main(int argc, char* argv[])
     const char *cap_str = NULL;
     uint64_t *counters = safe_alloc((CAPABILITIES_COUNT + 1)*sizeof(uint64_t));
 
-    while ((res = getopt(argc, argv, "+cfvp:")) != -1)
-    {
-	switch (res)
-	{
-        case 'c':
-            summarize = 1;
-	    break;
-        case 'f':
-            follow_forks = 1;
-	    break;
-	case 'p':
-	    target = atoi(optarg);
-	    if (target == 0)
-	    {
-                fprintf(stderr, "Error: invalid PID\n");
-		print_usage();
-	    }
-	    break;
-        case 't':
-	    tracefs_path = optarg;
-	    break;
-	case 'v':
-	    verbose = 1;
-	    break;
-	default:
-	    print_usage();
-	}
-    }
-
     for (size_t i = 0; i < CAPABILITIES_COUNT; i++)
-    {
         max_cap_len = max(strlen(CAPABILITIES[i]), max_cap_len);
-    }
 
-    tracefs_fd = open(tracefs_path, O_PATH | O_DIRECTORY);
-    if (tracefs_fd < 0)
-    {
-	res = errno;
-	if (res == EACCES)
-            fprintf(stderr, "Error: cannot access tracefs, run me with higher privileges?\n");
-	else
-            fprintf(stderr, "Error: open(%s) code %d, try specifying -t ?\n", tracefs_path, res);
-	goto cleanup;
-    }
-
-    res = write_tracing("kprobe_events", KPROBE_DEF);
+    res = write_tracing(tracefs_fd, "kprobe_events", KPROBE_DEF);
     if (res != 0)
     {
         fprintf(stderr, "Error: unable to create kprobe, code %d\n", res);
-	goto cleanup;
+        goto cleanup;
     } 
 
     if (follow_forks > 0)
     {
-	res = write_tracing("trace_options", "event-fork\n");
-	if (res != 0)
-	{
-	    fprintf(stderr, "Error: unable to set trace option event-fork, code %d\n", res);
-	}
+        res = write_tracing(tracefs_fd, "trace_options", "event-fork\n");
+        if (res != 0)
+        {
+            fprintf(stderr, "Error: unable to set trace option event-fork, code %d\n", res);
+        }
     }
 
-    if (target > 0)
+    if (target_pid > 0)
     {
-	res = write_tracing("set_event_pid", "%u\n", target);
-	if (res != 0)
-	{
-	    fprintf(stderr, "Error: unable to set kprobe pid target, code %d\n", res);
-	    goto cleanup;
-	}
+        res = write_tracing(tracefs_fd, "set_event_pid", "%u\n", target_pid);
+        if (res != 0)
+        {
+            fprintf(stderr, "Error: unable to set kprobe pid target, code %d\n", res);
+            goto cleanup;
+        }
     }
     else
     {
-	res = write_tracing("set_event_pid", "\n");
-	if (res != 0)
-	{
-	    fprintf(stderr, "Error: unable to remove kprobe target pids, code %d\n", res);
-	    goto cleanup;
-	}
+        res = write_tracing(tracefs_fd, "set_event_pid", "\n");
+        if (res != 0)
+        {
+            fprintf(stderr, "Error: unable to remove kprobe target pids, code %d\n", res);
+            goto cleanup;
+        }
     }
 
-    res = write_tracing("events/kprobes/captrace/enable", "1\n");
+    res = write_tracing(tracefs_fd, "events/kprobes/captrace/enable", "1\n");
     if (res != 0)
     {
         fprintf(stderr, "Error: unable to enable kprobe, code %d\n", res);
-	goto cleanup;
+        goto cleanup;
     }
-    
+
     pipe_fd = openat(tracefs_fd, "trace_pipe", O_RDONLY);
     if (pipe_fd < 0)
     {
-	res = errno;
+        res = errno;
         fprintf(stderr, "Error: openat(trace_pipe) code %d\n", res);
-	goto cleanup;
+        goto cleanup;
     }
     pipe_file = fdopen(pipe_fd, "r");
     if (pipe_file == NULL)
@@ -267,7 +214,7 @@ int main(int argc, char* argv[])
         fprintf(stderr, "Error: fdopen(trace_pipe) code %d\n", res);
         goto cleanup;
     }
-    res = write_tracing("tracing_on", "1\n");
+    res = write_tracing(tracefs_fd, "tracing_on", "1\n");
     if (res != 0)
     {
         fprintf(stderr, "Error: unable to enable tracing, code %d\n", res);
@@ -279,57 +226,57 @@ int main(int argc, char* argv[])
     while ((res = fscanf(pipe_file, KPROBE_FORMAT,
         cap_prog, &cap_num, &cap_audit)) != EOF)
     {
-	if (interrupted || res != 3)
+        if (interrupted || res != 3)
             break;
-	if (!cap_audit && !verbose)
+        if (!cap_audit && !verbose)
             continue;
-	cap_pid = 0;
-	for (int i = strlen(cap_prog); i >= 0; i--)
+        cap_pid = 0;
+        for (int i = strlen(cap_prog); i >= 0; i--)
         {
             if (cap_prog[i] == '-')
-	    {
+            {
                 cap_pid = atoll(cap_prog + i + 1);
-		cap_prog[i] = '\0';
-		break;
-	    }
-	}
+                cap_prog[i] = '\0';
+                break;
+            }
+        }
         if (cap_pid == 0)
         {
-	    fprintf(stderr, "Error: cannot read PID from '%s'\n", cap_prog);
-	    continue;
-	}
-	if (cap_pid == this_pid)
+            fprintf(stderr, "Error: cannot read PID from '%s'\n", cap_prog);
             continue;
-	if (cap_num >= CAPABILITIES_COUNT)
+        }
+        if (cap_pid == this_pid)
+            continue;
+        if (cap_num >= CAPABILITIES_COUNT)
         {
-	    fprintf(stderr, "Error: unknown capability %" PRIu64 "\n", cap_num);
-	    continue;
-	}
-	counters[cap_num]++;
-	if (summarize)
-	    continue;
+            fprintf(stderr, "Error: unknown capability %" PRIu64 "\n", cap_num);
+            continue;
+        }
+        counters[cap_num]++;
+        if (summarize)
+            continue;
         cap_str = CAPABILITIES[cap_num];
-	res = get_prog_path(cap_pid, cap_prog_path, PATH_MAX + 1);
-	if (res != 0)
+        res = get_prog_path(cap_pid, cap_prog_path, PATH_MAX + 1);
+        if (res != 0)
             snprintf(cap_prog_path, PATH_MAX + 1, cap_prog);
-	printf("%-*s\t%" PRIu64 "\t%s\n", (int)max_cap_len, cap_str, cap_pid, cap_prog_path);
+        printf("%-*s\t%" PRIu64 "\t%s\n", (int)max_cap_len, cap_str, cap_pid, cap_prog_path);
     }
     if (!interrupted && res != 4)
     {
         fprintf(stderr, "Error while reading trace event: code %u error %u\n", res, errno);
     }
     if (interrupted)
-	fprintf(stderr, "\n");
+        fprintf(stderr, "\n");
     if (summarize)
     {
-	fprintf(stderr, "%-*s uses\n", (int)max_cap_len, "capability");
-	fprintf(stderr, "%-*s ----\n", (int)max_cap_len, "----------");
-	for (size_t i = 0; i < CAPABILITIES_COUNT; i++)
-	{
+        fprintf(stderr, "%-*s uses\n", (int)max_cap_len, "capability");
+        fprintf(stderr, "%-*s ----\n", (int)max_cap_len, "----------");
+        for (size_t i = 0; i < CAPABILITIES_COUNT; i++)
+        {
             if (counters[i] == 0)
-		continue;
-	    printf("%-*s %" PRIu64 "\n", (int)max_cap_len, CAPABILITIES[i], counters[i]);
-	}
+                continue;
+            printf("%-*s %" PRIu64 "\n", (int)max_cap_len, CAPABILITIES[i], counters[i]);
+        }
     }
 
 cleanup:
@@ -338,10 +285,72 @@ cleanup:
     if (cap_prog != NULL)
         free(cap_prog);
     if (cap_prog_path != NULL)
-	free(cap_prog_path);
-    write_tracing("events/kprobes/captrace/enable", "0\n");
-    write_tracing("kprobe_events", KPROBE_UNDEF);
-    write_tracing("trace_options", "noevent-fork\n");
-    write_tracing("tracing_on", "0\n");
+        free(cap_prog_path);
+    if (tracefs_fd > 0)
+    {
+        write_tracing(tracefs_fd, "events/kprobes/captrace/enable", "0\n");
+        write_tracing(tracefs_fd, "kprobe_events", KPROBE_UNDEF);
+        write_tracing(tracefs_fd, "trace_options", "noevent-fork\n");
+        write_tracing(tracefs_fd, "tracing_on", "0\n");
+        close(tracefs_fd);
+    }
+    return res;
+}
+
+int main(int argc, char* argv[])
+{
+    int res = 0;
+    int follow_forks = 0;
+    int summarize = 0;
+    int verbose = 0;
+    uint64_t target_pid = 0;
+    const char *tracefs_path = "/sys/kernel/debug/tracing";
+    int tracefs_fd = -1;
+
+    while ((res = getopt(argc, argv, "+cfvp:")) != -1)
+    {
+        switch (res)
+        {
+        case 'c':
+            summarize = 1;
+            break;
+        case 'f':
+            follow_forks = 1;
+            break;
+        case 'p':
+            target_pid = atoi(optarg);
+            if (target_pid == 0)
+            {
+                fprintf(stderr, "Error: invalid PID\n");
+                print_usage();
+            }
+            break;
+        case 't':
+            tracefs_path = optarg;
+            break;
+        case 'v':
+            verbose = 1;
+            break;
+        default:
+            print_usage();
+        }
+    }
+
+    tracefs_fd = open(tracefs_path, O_PATH | O_DIRECTORY);
+    if (tracefs_fd < 0)
+    {
+        res = errno;
+        if (res == EACCES)
+            fprintf(stderr, "Error: cannot access tracefs, run me with higher privileges?\n");
+        else
+            fprintf(stderr, "Error: open(%s) code %d, try specifying -t ?\n", tracefs_path, res);
+        goto cleanup;
+    }
+
+    res = captrace(tracefs_fd, target_pid, follow_forks, verbose, summarize);
+
+cleanup:
+    if (tracefs_fd > 0)
+        close(tracefs_fd);
     return res;
 }
