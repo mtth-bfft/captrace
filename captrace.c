@@ -2,16 +2,12 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
-#include <linux/capability.h>
 #include <linux/limits.h>
-#include <sched.h>
 #include <signal.h>
 #include <stdarg.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mount.h>
 #include <unistd.h>
 
 // Comm+pid can take up to TASK_COMM_LEN + len(PID_MAX_LIMIT) bytes, way fewer than this
