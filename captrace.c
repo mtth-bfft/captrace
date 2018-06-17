@@ -62,7 +62,7 @@ static const char* CAPABILITIES[] = {
     [36] = "CAP_BLOCK_SUSPEND",
     [37] = "AUDIT_READ",
 };
-static const int CAPABILITIES_COUNT = sizeof(CAPABILITIES)/sizeof(CAPABILITIES[0]);
+static const size_t CAPABILITIES_COUNT = sizeof(CAPABILITIES)/sizeof(CAPABILITIES[0]);
 
 void print_usage()
 {
@@ -72,7 +72,7 @@ void print_usage()
     fprintf(stderr, "  -f            also captrace forked children\n");
     fprintf(stderr, "  -p <pid>      only trace that process id\n");
     fprintf(stderr, "  -t <path>     path to a tracefs mountpoint\n");
-    fprintf(stderr, "  -v            print non-audited capability checks\n");
+    fprintf(stderr, "  -v            show non-audited capability checks\n");
     exit(-1);
 }
 
@@ -166,7 +166,7 @@ int main(int argc, char* argv[])
     const char *cap_str = NULL;
     uint64_t *counters = safe_alloc((CAPABILITIES_COUNT + 1)*sizeof(uint64_t));
 
-    while ((res = getopt(argc, argv, "+cfv")) != -1)
+    while ((res = getopt(argc, argv, "+cfvp:")) != -1)
     {
 	switch (res)
 	{
@@ -195,7 +195,7 @@ int main(int argc, char* argv[])
 	}
     }
 
-    for (int i = 0; i < CAPABILITIES_COUNT; i++)
+    for (size_t i = 0; i < CAPABILITIES_COUNT; i++)
     {
         max_cap_len = max(strlen(CAPABILITIES[i]), max_cap_len);
     }
@@ -218,9 +218,17 @@ int main(int argc, char* argv[])
 	goto cleanup;
     } 
 
+    if (follow_forks > 0)
+    {
+	res = write_tracing("trace_options", "event-fork\n");
+	if (res != 0)
+	{
+	    fprintf(stderr, "Error: unable to set trace option event-fork, code %d\n", res);
+	}
+    }
+
     if (target > 0)
     {
-        // TODO: enumerate existing child tasks and attach to them
 	res = write_tracing("set_event_pid", "%u\n", target);
 	if (res != 0)
 	{
@@ -236,16 +244,6 @@ int main(int argc, char* argv[])
 	    fprintf(stderr, "Error: unable to remove kprobe target pids, code %d\n", res);
 	    goto cleanup;
 	}
-    }
-
-    if (follow_forks > 0)
-    {
-	res = write_tracing("trace_options", "event-fork\n");
-	if (res != 0)
-	{
-	    fprintf(stderr, "Error: unable to set trace option event-fork, code %d\n", res);
-	    goto cleanup;
-	} 
     }
 
     res = write_tracing("events/kprobes/captrace/enable", "1\n");
@@ -291,6 +289,7 @@ int main(int argc, char* argv[])
             if (cap_prog[i] == '-')
 	    {
                 cap_pid = atoll(cap_prog + i + 1);
+		cap_prog[i] = '\0';
 		break;
 	    }
 	}
@@ -312,7 +311,7 @@ int main(int argc, char* argv[])
         cap_str = CAPABILITIES[cap_num];
 	res = get_prog_path(cap_pid, cap_prog_path, PATH_MAX + 1);
 	if (res != 0)
-            snprintf(cap_prog_path, PATH_MAX + 1, "(error %u while accessing)", res);
+            snprintf(cap_prog_path, PATH_MAX + 1, cap_prog);
 	printf("%-*s\t%" PRIu64 "\t%s\n", (int)max_cap_len, cap_str, cap_pid, cap_prog_path);
     }
     if (!interrupted && res != 4)
@@ -325,7 +324,7 @@ int main(int argc, char* argv[])
     {
 	fprintf(stderr, "%-*s uses\n", (int)max_cap_len, "capability");
 	fprintf(stderr, "%-*s ----\n", (int)max_cap_len, "----------");
-	for (int i = 0; i < CAPABILITIES_COUNT; i++)
+	for (size_t i = 0; i < CAPABILITIES_COUNT; i++)
 	{
             if (counters[i] == 0)
 		continue;
