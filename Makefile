@@ -1,19 +1,14 @@
-MAKEFLAGS += --no-builtin-rules
-.PHONY: clean
+CFLAGS  ?= -Wall -Wextra -pedantic -Werror -g -O0
+LDFLAGS ?=
 
-DEBUG   ?= false
-CFLAGS  ?= -std=c11 -Wall -Wextra -pedantic -Werror
-LDFLAGS ?= -static
-SOURCES ?= $(wildcard *.c)
+.PHONY: captrace default static clean
 
-ifeq ($(DEBUG),false)
-	CFLAGS += -O2
-else
-	CFLAGS += -g -O0
-endif
+default: captrace
 
-captrace: $(SOURCES)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+static: LDFLAGS += -static
+
+static captrace: captrace.c
+	$(CC) $(CFLAGS) -o captrace $< $(LDFLAGS)
 
 clean:
-	rm -f captrace *.o
+	rm -f captrace

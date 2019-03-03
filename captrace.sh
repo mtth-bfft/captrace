@@ -1,6 +1,6 @@
-#!/bin/bash -eu
+#!/bin/sh
 
-# Copyright 2018 Matthieu Buffet
+# Copyright 2018-2019 Matthieu Buffet
 # Permission is hereby granted, free of charge, to any person
 # obtaining a copy of this software and associated documentation
 # files (the "Software"), to deal in the Software without
@@ -19,19 +19,39 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
-usage() { echo "Usage: captrace.sh [-v] [-f] [-p <pid>] [-t <tracefs>]" 1>&2; exit 1; }
+set -eu
 
+usage() {
+    echo "Usage: captrace.sh [-h] [-f] [-r] [-p <pid>] [-t <tracefs>]" >&2
+    echo "" >&2
+    echo "  -h            display this help text" >&2
+    echo "  -f            display capabilities used by forked processes" >&2
+    echo "  -r            display raw events without formatting" >&2
+    echo "  -p <pid>      only show capabilities used by one process" >&2
+    echo "  -t <tracefs>  use the given tracefs filesystem" >&2
+    echo "                (default is to use /sys/kernel/debug/tracing" >&2
+    exit 1
+}
+
+TRACEFS="/sys/kernel/debug/tracing"
 TARGET_PID=""
 TRACEOPTS="noevent-fork"
-TRACEFS="/sys/kernel/debug/tracing"
-while getopts "vfp:" o; do
+PRETTIFY=1
+while getopts "frvp:t:" o; do
     case "${o}" in
         p) TARGET_PID=${OPTARG} ;;
         f) TRACEOPTS="event-fork" ;;
-	t) TRACEFS=${OPTARG} ;;
+        t) TRACEFS=${OPTARG} ;;
+        r) PRETTIFY=0 ;;
         *) usage ;;
     esac
 done
+
+if ! [ -d "$TRACEFS" ] || ! [ -f "$TRACEFS/trace_pipe" ]; then
+    echo "Error: captrace.sh requires a mounted tracefs" >&2
+    echo "You can specify its location using -t /sys/kernel/..." >&2
+    exit 1
+fi
 
 function cleanup() {
     [ -d "$TRACEFS" ] || return
@@ -52,4 +72,8 @@ echo "$TRACEOPTS" > "$TRACEFS/trace_options"
 echo 1 > "$TRACEFS/events/kprobes/captrace/enable"
 echo 1 > "$TRACEFS/tracing_on"
 
-sed -rn 's/captrace *: *\([^)]+\) +//p' "$TRACEFS/trace_pipe"
+if [ $PRETTIFY -ne 0 ]; then
+    sed -rn 's/ *([^[]+) *\[[0-9]+\][ .]*([0-9.]+):?.*(userns=[0-9xa-f]+).*(cap=[0-9xa-f]+).*(audit=[0-9xa-f]+).*/\2\t\1\t\4\t\3\t\5/p' "$TRACEFS/trace_pipe"
+else
+    cat "$TRACEFS/trace_pipe"
+fi
