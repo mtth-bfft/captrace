@@ -170,7 +170,7 @@ int write_tracing(int tracefs_fd, const char *path, const char *format, ...)
     if (tmp_fd < 0)
     {
         res = errno;
-        fprintf(stderr, "Error: openat(%s) code %d\n", path, res);
+        fprintf(stderr, "Error: openat(%s) code %d (%s)\n", path, res, strerror(res));
         goto cleanup;
     }
 
@@ -199,7 +199,7 @@ int setup_tracing(int tracefs_fd, uint64_t target_pid, int follow_forks)
     res = write_tracing(tracefs_fd, "kprobe_events", KPROBE_DEF);
     if (res != 0 && res != EBUSY) // ignore error in case of leftover probe from previous session
     {
-        fprintf(stderr, "Error: unable to create kprobe, code %d\n", res);
+        fprintf(stderr, "Error: unable to create kprobe, code %d (%s)\n", res, strerror(res));
         goto cleanup;
     } 
 
@@ -208,7 +208,7 @@ int setup_tracing(int tracefs_fd, uint64_t target_pid, int follow_forks)
         res = write_tracing(tracefs_fd, "trace_options", "event-fork\n");
         if (res != 0)
         {
-            fprintf(stderr, "Error: unable to set trace option event-fork, code %d\n", res);
+            fprintf(stderr, "Error: unable to set trace option event-fork, code %d (%s)\n", res, strerror(res));
         }
     }
 
@@ -217,7 +217,7 @@ int setup_tracing(int tracefs_fd, uint64_t target_pid, int follow_forks)
         res = write_tracing(tracefs_fd, "set_event_pid", "%u\n", target_pid);
         if (res != 0)
         {
-            fprintf(stderr, "Error: unable to set kprobe pid target, code %d\n", res);
+            fprintf(stderr, "Error: unable to set kprobe pid target, code %d (%s)\n", res, strerror(res));
             goto cleanup;
         }
     }
@@ -226,7 +226,7 @@ int setup_tracing(int tracefs_fd, uint64_t target_pid, int follow_forks)
         res = write_tracing(tracefs_fd, "set_event_pid", "\n");
         if (res != 0)
         {
-            fprintf(stderr, "Error: unable to remove kprobe target pids, code %d\n", res);
+            fprintf(stderr, "Error: unable to remove kprobe target pids, code %d (%s)\n", res, strerror(res));
             goto cleanup;
         }
     }
@@ -234,14 +234,14 @@ int setup_tracing(int tracefs_fd, uint64_t target_pid, int follow_forks)
     res = write_tracing(tracefs_fd, "events/kprobes/captrace/enable", "1\n");
     if (res != 0)
     {
-        fprintf(stderr, "Error: unable to enable kprobe, code %d\n", res);
+        fprintf(stderr, "Error: unable to enable kprobe, code %d (%s)\n", res, strerror(res));
         goto cleanup;
     }
 
     res = write_tracing(tracefs_fd, "tracing_on", "1\n");
     if (res != 0)
     {
-        fprintf(stderr, "Error: unable to enable tracing, code %d\n", res);
+        fprintf(stderr, "Error: unable to enable tracing, code %d (%s)\n", res, strerror(res));
         goto cleanup;
     }
 
@@ -292,14 +292,14 @@ int process_tracing(int tracefs_fd, int audited_only, int summarize, FILE *out)
     if (pipe_fd < 0)
     {
         res = errno;
-        fprintf(stderr, "Error: openat(trace_pipe) code %d\n", res);
+        fprintf(stderr, "Error: openat(trace_pipe) code %d (%s)\n", res, strerror(res));
         goto cleanup;
     }
     pipe_file = fdopen(pipe_fd, "r");
     if (pipe_file == NULL)
     {
         res = errno;
-        fprintf(stderr, "Error: fdopen(trace_pipe) code %d\n", res);
+        fprintf(stderr, "Error: fdopen(trace_pipe) code %d (%s)\n", res, strerror(res));
         goto cleanup;
     }
 
@@ -382,19 +382,19 @@ int cleanup_tracing(int tracefs_fd)
 
     res = write_tracing(tracefs_fd, "events/kprobes/captrace/enable", "0\n");
     if (res != 0)
-        fprintf(stderr, "Error: unable to disable kprobe, code %d\n", res);
+        fprintf(stderr, "Error: unable to disable kprobe, code %d (%s)\n", res, strerror(res));
     res = write_tracing(tracefs_fd, "kprobe_events", KPROBE_UNDEF);
     if (res != 0 && res != ENOENT)
-        fprintf(stderr, "Error: unable to undefine kprobe, code %d\n", res);
+        fprintf(stderr, "Error: unable to undefine kprobe, code %d (%s)\n", res, strerror(res));
     res = write_tracing(tracefs_fd, "trace_options", "noevent-fork\n");
     if (res != 0)
-        fprintf(stderr, "Error: unable to undefine kprobe, code %d\n", res);
+        fprintf(stderr, "Error: unable to undefine kprobe, code %d (%s)\n", res, strerror(res));
     res = write_tracing(tracefs_fd, "set_event_pid", "\n");
     if (res != 0)
-        fprintf(stderr, "Error: unable to remove trace PID filter, code %d\n", res);
+        fprintf(stderr, "Error: unable to remove trace PID filter, code %d (%s)\n", res, strerror(res));
     res = write_tracing(tracefs_fd, "tracing_on", "0\n");
     if (res != 0)
-        fprintf(stderr, "Error: unable to disable tracing, code %d\n", res);
+        fprintf(stderr, "Error: unable to disable tracing, code %d (%s)\n", res, strerror(res));
     return res;
 }
 
@@ -456,7 +456,7 @@ int main(int argc, char* argv[])
         res = pipe2(syncpipe_fd, O_CLOEXEC);
         if (res != 0)
         {
-            fprintf(stderr, "Error: pipe(): %d\n", errno);
+            fprintf(stderr, "Error: pipe(): %d (%s)\n", errno, strerror(errno));
             exit(errno);
         }
         target_pid = fork();
@@ -466,11 +466,11 @@ int main(int argc, char* argv[])
             close(syncpipe_fd[1]);
             if (read(syncpipe_fd[0], &res, sizeof(res)) != sizeof(res))
             {
-                fprintf(stderr, "Error waiting for parent process: %d\n", errno);
+                fprintf(stderr, "Error waiting for parent process: %d (%s)\n", errno, strerror(errno));
                 exit(errno);
             }
             execvp(argv[optind], &(argv[optind]));
-            fprintf(stderr, "Error: execve(%s): %d\n", argv[optind], errno);
+            fprintf(stderr, "Error: execve(%s): %d (%s)\n", argv[optind], errno, strerror(errno));
             exit(errno);
         }
         close(syncpipe_fd[0]);
@@ -483,7 +483,7 @@ int main(int argc, char* argv[])
         if (res == EACCES)
             fprintf(stderr, "Error: cannot access tracefs, run me with higher privileges?\n");
         else
-            fprintf(stderr, "Error: opening a tracefs (code %d), please specify the path to a tracefs with -t\n", res);
+	  fprintf(stderr, "Error: opening a tracefs (code %d (%s)), please specify the path to a tracefs with -t\n", res, strerror(res));
         goto cleanup;
     }
 
@@ -495,7 +495,7 @@ int main(int argc, char* argv[])
     {
         if (write(syncpipe_fd[1], &res, sizeof(res)) != sizeof(res))
         {
-            fprintf(stderr, "Error signaling child process: %d\n", errno);
+            fprintf(stderr, "Error signaling child process: %d (%s)\n", errno, strerror(errno));
             exit(errno);
         }
         close(syncpipe_fd[1]);
