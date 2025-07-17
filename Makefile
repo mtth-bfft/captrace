@@ -1,4 +1,4 @@
-CFLAGS  ?= -Wall -Wextra -pedantic -Werror -g -O0
+CFLAGS  ?= -std=c17 -Wall -Wextra -pedantic -Werror -g -O0
 LDFLAGS ?=
 
 .PHONY: captrace default static clean
