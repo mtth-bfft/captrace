@@ -65,7 +65,7 @@ static const char* CAPABILITIES[CAPABILITY_COUNT] = {
     [CAP_AUDIT_READ] = "CAP_AUDIT_READ",
 };
 
-void print_usage()
+void print_usage(void)
 {
     fprintf(stderr, "Usage: captrace [-s] [-f] [-p <pid>] [-t <tracefs>] [command [args]]\n");
     fprintf(stderr, "\n");
@@ -336,7 +336,7 @@ int process_tracing(int tracefs_fd, int audited_only, int summarize, FILE *out)
             continue;
         res = get_prog_path_by_pid(cap_pid, cap_prog_path, PATH_MAX + 1);
         if (res != 0)
-            snprintf(cap_prog_path, PATH_MAX + 1, cap_prog);
+            strncpy(cap_prog_path, cap_prog, PATH_MAX + 1);
         cap_str = resolve_capability_name(cap_num);
         if (cap_str == NULL)
             fprintf(out, "%Lf\t%" PRIu64 "\t%s\t%-*" PRIu64 "\n",
