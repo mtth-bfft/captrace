@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdbool.h>
 
 // "<program name>-<pid>" can take up to TASK_COMM_LEN + len(PID_MAX_LIMIT) bytes, way fewer than this
 #define MAX_PROGNAME_PID_SIZE 255
@@ -330,10 +331,20 @@ int process_tracing(int tracefs_fd, int audited_only, int summarize, FILE *out)
             fprintf(stderr, "Error: cannot parse PID from '%s'\n", cap_prog);
             continue;
         }
-        if (cap_pid == this_pid)
+        if (cap_pid == this_pid) // don't pollute logs with ourselves
             continue;
-        if (cap_num < CAPABILITY_COUNT)
-            counters[cap_num]++;
+        if (cap_num >= CAPABILITY_COUNT)
+        {
+            static bool warned = false;
+            if (!warned)
+            {
+                warned = true;
+                fprintf(stderr, "Error: unknown capability %lu, please open an issue:\n", cap_num);
+                fprintf(stderr, "       https://github.com/mtth-bfft/captrace/issues/new\n");
+            }
+            continue;
+        }
+        counters[cap_num]++;
         if (summarize)
             continue;
         res = get_prog_path_by_pid(cap_pid, cap_prog_path, PATH_MAX + 1);
