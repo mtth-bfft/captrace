@@ -418,7 +418,7 @@ int main(int argc, char* argv[])
     int syncpipe_fd[2] = { 0 };
     FILE *output_file = stdout;
 
-    while ((res = getopt(argc, argv, "+sfvt:p:")) != -1)
+    while ((res = getopt(argc, argv, "+sfvt:o:p:")) != -1)
     {
         switch (res)
         {
