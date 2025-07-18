@@ -423,7 +423,7 @@ int main(int argc, char* argv[])
     int summarize = 0;
     int audited_only = 1;
     uint64_t target_pid = 0;
-    const char *tracefs_path = "/sys/kernel/debug/tracing";
+    const char *tracefs_path = NULL;
     int tracefs_fd = -1;
     int target_is_child = 0;
     int syncpipe_fd[2] = { 0 };
@@ -502,15 +502,29 @@ int main(int argc, char* argv[])
         close(syncpipe_fd[0]);
     }
 
-    tracefs_fd = open(tracefs_path, O_PATH | O_DIRECTORY);
+    if (tracefs_path == NULL)
+    {
+        tracefs_path = "/sys/kernel/tracing";
+        tracefs_fd = open(tracefs_path, O_PATH | O_DIRECTORY);
+        if (tracefs_fd < 0)
+        {
+            // Legacy location, for kernel versions < 4.1 where tracing
+            // was in the debugfs
+            tracefs_fd = open("/sys/kernel/debug/tracing", O_PATH | O_DIRECTORY);
+        }
+    }
+    else
+    {
+        tracefs_fd = open(tracefs_path, O_PATH | O_DIRECTORY);
+    }
     if (tracefs_fd < 0)
     {
         res = errno;
         if (res == EACCES)
             fprintf(stderr, "Error: cannot access tracefs, run me with higher privileges?\n");
         else
-            fprintf(stderr, "Error: opening a tracefs (code %d (%s)), please specify the path to a tracefs with -t\n", res, strerror(res));
-        goto cleanup;
+            fprintf(stderr, "Error: opening %s failed with error %d (%s), please specify the path to a tracefs with -t\n", tracefs_path, res, strerror(res));
+        exit(res);
     }
 
     res = setup_tracing(tracefs_fd, target_pid, follow_forks);
@@ -530,10 +544,7 @@ int main(int argc, char* argv[])
     res = process_tracing(tracefs_fd, audited_only, summarize, output_file);
 
 cleanup:
-    if (tracefs_fd >= 0)
-    {
-        cleanup_tracing(tracefs_fd);
-        close(tracefs_fd);
-    }
+    cleanup_tracing(tracefs_fd);
+    close(tracefs_fd);
     return res;
 }
