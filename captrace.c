@@ -168,6 +168,14 @@ int write_tracing(int tracefs_fd, const char *path, const char *format, ...)
     va_list args;
     ssize_t bytes_written = 0;
 
+    // Clear any previous error. Best effort, continue if it fails
+    // as the primary goal is writing to `path`
+    tmp_fd = openat(tracefs_fd, "error_log", O_WRONLY | O_TRUNC);
+    if (tmp_fd >= 0)
+    {
+        close(tmp_fd);
+    }
+
     va_start(args, format);
     tmp_fd = openat(tracefs_fd, path, O_WRONLY | O_TRUNC);
     if (tmp_fd < 0)
@@ -189,6 +197,28 @@ cleanup:
 }
 
 /**
+ * Kernel stores the last 8 error messages returned by the tracing framework
+ * in a global tracefs file. We clear it before each write, but it's still
+ * racy to use it.
+ */
+void print_last_tracing_error(int tracefs_fd)
+{
+    char err_msg[255];
+    ssize_t bytes_read;
+    int err_fd;
+
+    err_fd = openat(tracefs_fd, "error_log", O_RDONLY);
+    if (err_fd < 0)
+        return;
+
+    while ((bytes_read = read(err_fd, err_msg, sizeof(err_msg) - 1)) > 0)
+    {
+        write(STDERR_FILENO, err_msg, bytes_read);
+    }
+    close(err_fd);
+}
+
+/**
  * Sets up a tracing session. Optionally restricts the session to a given PID
  * instead of the whole system. Optionally traces the child processes of the target.
  * When summarize is 0, capabilities are printed as they are used, otherwise,
@@ -203,8 +233,9 @@ int setup_tracing(int tracefs_fd, uint64_t target_pid, int follow_forks)
     if (res != 0 && res != EBUSY) // ignore error in case of leftover probe from previous session
     {
         fprintf(stderr, "Error: unable to create kprobe, code %d (%s)\n", res, strerror(res));
+        print_last_tracing_error(tracefs_fd);
         goto cleanup;
-    } 
+    }
 
     if (follow_forks > 0)
     {
@@ -212,6 +243,7 @@ int setup_tracing(int tracefs_fd, uint64_t target_pid, int follow_forks)
         if (res != 0)
         {
             fprintf(stderr, "Error: unable to set trace option event-fork, code %d (%s)\n", res, strerror(res));
+            print_last_tracing_error(tracefs_fd);
         }
     }
 
@@ -221,6 +253,7 @@ int setup_tracing(int tracefs_fd, uint64_t target_pid, int follow_forks)
         if (res != 0)
         {
             fprintf(stderr, "Error: unable to set kprobe pid target, code %d (%s)\n", res, strerror(res));
+            print_last_tracing_error(tracefs_fd);
             goto cleanup;
         }
     }
@@ -230,6 +263,7 @@ int setup_tracing(int tracefs_fd, uint64_t target_pid, int follow_forks)
         if (res != 0)
         {
             fprintf(stderr, "Error: unable to remove kprobe target pids, code %d (%s)\n", res, strerror(res));
+            print_last_tracing_error(tracefs_fd);
             goto cleanup;
         }
     }
@@ -238,6 +272,7 @@ int setup_tracing(int tracefs_fd, uint64_t target_pid, int follow_forks)
     if (res != 0)
     {
         fprintf(stderr, "Error: unable to enable kprobe, code %d (%s)\n", res, strerror(res));
+        print_last_tracing_error(tracefs_fd);
         goto cleanup;
     }
 
@@ -245,6 +280,7 @@ int setup_tracing(int tracefs_fd, uint64_t target_pid, int follow_forks)
     if (res != 0)
     {
         fprintf(stderr, "Error: unable to enable tracing, code %d (%s)\n", res, strerror(res));
+        print_last_tracing_error(tracefs_fd);
         goto cleanup;
     }
 
