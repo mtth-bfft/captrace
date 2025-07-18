@@ -67,15 +67,17 @@ static const char* CAPABILITIES[CAPABILITY_COUNT] = {
 
 void print_usage(void)
 {
-    fprintf(stderr, "Usage: captrace [-s] [-f] [-p <pid>] [-t <tracefs>] [command [args]]\n");
+    fprintf(stderr, "Usage: captrace [-s][-f][-v] [-o <out>] [-p <pid>] [-t <tracefs>] [command [args]]\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "Options:\n");
     fprintf(stderr, "  -s            only show a summary, when exiting\n");
     fprintf(stderr, "  -v            include non-audited capability checks\n");
     fprintf(stderr, "                (by default only audited checks are shown)\n");
-    fprintf(stderr, "  -f            also show capabilities in forked children\n");
+    fprintf(stderr, "  -f            follow forks, also trace capabilities in children\n");
     fprintf(stderr, "  -p <pid>      only trace the given process id\n");
-    fprintf(stderr, "  -t <path>     path to a tracefs mountpoint\n");
+    fprintf(stderr, "  -t <path>     path to tracefs (default: /sys/kernel/tracing)\n");
+    fprintf(stderr, "  -o <path>     output file to write to (default: stdout if\n");
+    fprintf(stderr, "                tracing an existing process, stderr otherwise)\n");
     fprintf(stderr, "  [command]     optional command to execute and trace\n");
     exit(-1);
 }
@@ -414,6 +416,7 @@ int main(int argc, char* argv[])
     int tracefs_fd = -1;
     int target_is_child = 0;
     int syncpipe_fd[2] = { 0 };
+    FILE *output_file = stdout;
 
     while ((res = getopt(argc, argv, "+sfvt:p:")) != -1)
     {
@@ -436,6 +439,14 @@ int main(int argc, char* argv[])
         case 't':
             tracefs_path = optarg;
             break;
+        case 'o':
+            output_file = fopen(optarg, "a");
+            if (output_file == NULL)
+            {
+                fprintf(stderr, "Error: could not open '%s': %s\n", optarg, strerror(errno));
+                print_usage();
+            }
+            break;
         case 'v':
             audited_only = 0;
             break;
@@ -448,6 +459,10 @@ int main(int argc, char* argv[])
     if (optind < argc)
     {
         target_is_child = 1;
+        if (output_file == stdout)
+        {
+            output_file = stderr; // don't mix stdout with the child's stdout
+        }
         if (target_pid != 0)
         {
             fprintf(stderr, "Error: only one target can be specified at a time, either use -p or append a commandline\n");
@@ -501,7 +516,7 @@ int main(int argc, char* argv[])
         close(syncpipe_fd[1]);
     }
 
-    res = process_tracing(tracefs_fd, audited_only, summarize, (target_is_child ? stderr : stdout));
+    res = process_tracing(tracefs_fd, audited_only, summarize, output_file);
 
 cleanup:
     if (tracefs_fd >= 0)
