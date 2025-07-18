@@ -483,7 +483,7 @@ int main(int argc, char* argv[])
         if (res == EACCES)
             fprintf(stderr, "Error: cannot access tracefs, run me with higher privileges?\n");
         else
-	  fprintf(stderr, "Error: opening a tracefs (code %d (%s)), please specify the path to a tracefs with -t\n", res, strerror(res));
+            fprintf(stderr, "Error: opening a tracefs (code %d (%s)), please specify the path to a tracefs with -t\n", res, strerror(res));
         goto cleanup;
     }
 
