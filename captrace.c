@@ -25,6 +25,8 @@ static const char *KPROBE_DEF = "p:captrace ns_capable_common cap=%%si audit=%%d
 static const char *KPROBE_UNDEF = "-:captrace\n";
 static const char *KPROBE_FORMAT = " %" xstr(MAX_PROGNAME_PID_SIZE) "s %*s %*s %Lf : captrace: %*s cap=%" SCNx64 " audit=%" SCNx64 " ";
 static volatile int interrupted = 0;
+// To keep updated, e.g.:
+// cat /usr/include/linux/capability.h | sed -rn 's/^#define (CAP_\S+)\s+([0-9]+)$/[\1] = "\1",/p'
 static const char* CAPABILITIES[CAPABILITY_COUNT] = {
     [CAP_CHOWN] = "CAP_CHOWN",
     [CAP_DAC_OVERRIDE] = "CAP_DAC_OVERRIDE",
@@ -64,6 +66,9 @@ static const char* CAPABILITIES[CAPABILITY_COUNT] = {
     [CAP_WAKE_ALARM] = "CAP_WAKE_ALARM",
     [CAP_BLOCK_SUSPEND] = "CAP_BLOCK_SUSPEND",
     [CAP_AUDIT_READ] = "CAP_AUDIT_READ",
+    [CAP_PERFMON] = "CAP_PERFMON",
+    [CAP_BPF] = "CAP_BPF",
+    [CAP_CHECKPOINT_RESTORE] = "CAP_CHECKPOINT_RESTORE",
 };
 
 void print_usage(void)
