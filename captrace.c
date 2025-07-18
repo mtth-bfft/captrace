@@ -450,7 +450,7 @@ int main(int argc, char* argv[])
         target_is_child = 1;
         if (target_pid != 0)
         {
-            fprintf(stderr, "Error: only one target can be specified at a time\n");
+            fprintf(stderr, "Error: only one target can be specified at a time, either use -p or append a commandline\n");
             print_usage();
         }
         res = pipe2(syncpipe_fd, O_CLOEXEC);
