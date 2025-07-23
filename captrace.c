@@ -19,11 +19,16 @@
 #define max(x,y) ((x) >= (y) ? (x) : (y))
 #define CAPABILITY_COUNT ((CAP_LAST_CAP) + 1)
 
+// Only defined in kernels >= v3.3-RC1
+#define CAP_OPT_NOAUDIT 2
+// Only defined in kernels < 3.3-RC1
+#define SECURITY_CAP_AUDIT 1
+
 typedef uint64_t cap_num_t;
 
-static const char *KPROBE_DEF = "p:captrace ns_capable_common cap=%%si audit=%%dx\n";
+static const char *KPROBE_DEF = "p:captrace cap_capable arg3=%%dx arg4=%%r10 arg5=%%r8\n";
 static const char *KPROBE_UNDEF = "-:captrace\n";
-static const char *KPROBE_FORMAT = " %" xstr(MAX_PROGNAME_PID_SIZE) "s %*s %*s %Lf : captrace: %*s cap=%" SCNx64 " audit=%" SCNx64 " ";
+static const char *KPROBE_FORMAT = " %" xstr(MAX_PROGNAME_PID_SIZE) "s %*s %*s %Lf : captrace : %*s arg3=%" SCNx64 " arg4=%" SCNx64 " arg5=%" SCNx64 " ";
 static volatile int interrupted = 0;
 // To keep updated, e.g.:
 // cat /usr/include/linux/capability.h | sed -rn 's/^#define (CAP_\S+)\s+([0-9]+)$/[\1] = "\1",/p'
@@ -309,8 +314,11 @@ int process_tracing(int tracefs_fd, int audited_only, int summarize, FILE *out)
     char *cap_prog_path = safe_alloc(PATH_MAX + 1);
     uint64_t cap_pid = 0;
     long double cap_time = 0.0;
-    cap_num_t cap_num = 0;
-    uint64_t cap_audit = 0;
+    uint64_t arg3 = 0;
+    uint64_t arg4 = 0;
+    uint64_t arg5 = 0;
+    cap_num_t cap_num;
+    bool cap_audit;
     const char *cap_str = NULL;
     uint64_t *counters = safe_alloc(CAPABILITY_COUNT * sizeof(uint64_t));
     size_t max_cap_len = 0;
@@ -348,12 +356,22 @@ int process_tracing(int tracefs_fd, int audited_only, int summarize, FILE *out)
     }
 
     while ((res = fscanf(pipe_file, KPROBE_FORMAT,
-        cap_prog, &cap_time, &cap_num, &cap_audit)) != EOF)
+        cap_prog, &cap_time, &arg3, &arg4, &arg5)) != EOF)
     {
         if (interrupted)
             break;
-        if (res != 4)
+        if (res != 5)
             continue;
+        if (arg3 >= 0xFFFF800000000000) // Kernel < v3.3-RC1
+        {
+            cap_num = arg4;
+            cap_audit = (arg5 & SECURITY_CAP_AUDIT) != 0;
+        }
+        else // Kernel >= v3.3-RC1
+        {
+            cap_num = arg3;
+            cap_audit = (arg4 & CAP_OPT_NOAUDIT) == 0;
+        }
         cap_pid = 0;
         // Parse PID from <prog name>-<pid> (prog name may include dashes...)
         for (int i = strlen(cap_prog); i >= 0; i--)

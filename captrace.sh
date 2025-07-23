@@ -66,14 +66,14 @@ trap cleanup EXIT
 (echo 0 > "$TRACEFS/events/kprobes/captrace/enable") 2>/dev/null || /bin/true
 echo '-:captrace' >> "$TRACEFS/kprobe_events" 2>/dev/null || /bin/true
 
-echo 'p:captrace ns_capable_common userns=%di cap=%si audit=%dx' > "$TRACEFS/kprobe_events"
+echo 'p:captrace cap_capable arg3=%dx arg4=%r10 arg5=%r8' > "$TRACEFS/kprobe_events"
 echo "$TARGET_PID" > "$TRACEFS/set_event_pid"
 echo "$TRACEOPTS" > "$TRACEFS/trace_options"
 echo 1 > "$TRACEFS/events/kprobes/captrace/enable"
 echo 1 > "$TRACEFS/tracing_on"
 
 if [ $PRETTIFY -ne 0 ]; then
-    sed -rn 's/ *([^[]+) *\[[0-9]+\][ .]*([0-9.]+):?.*(userns=[0-9xa-f]+).*(cap=[0-9xa-f]+).*(audit=[0-9xa-f]+).*/\2\t\1\t\4\t\3\t\5/p' "$TRACEFS/trace_pipe"
+    cat "$TRACEFS/trace_pipe" | sed -ru 's/\s*([^[]+)\s.+\s+([0-9.]+):?.+arg3=0?x?ffff.+arg4=(0?x?[0-9a-f]+).+arg5=(0?x?[0-9a-f]+)$/\2\t\1\tcap=\3\topts=\4/I' | sed -ru 's/\s*([^[]+)\s.+\s+([0-9.]+):?.+arg3=(0?x?[0-9a-f]+).+arg4=(0?x?[0-9a-f]+).+$/\2\t\1\tcap=\3\topts=\4/I'
 else
     cat "$TRACEFS/trace_pipe"
 fi
