@@ -76,28 +76,34 @@ static const char* CAPABILITIES[CAPABILITY_COUNT] = {
     [CAP_CHECKPOINT_RESTORE] = "CAP_CHECKPOINT_RESTORE",
 };
 
-void print_usage(void)
+static void print_help(FILE *out, int exit_status)
 {
-    fprintf(stderr, "Usage: captrace [-s][-f][-v] [-o <out>] [-p <pid>] [-t <tracefs>] [command [args]]\n");
-    fprintf(stderr, "\n");
-    fprintf(stderr, "Options:\n");
-    fprintf(stderr, "  -s            only show a summary, when exiting\n");
-    fprintf(stderr, "  -v            include non-audited capability checks\n");
-    fprintf(stderr, "                (by default only audited checks are shown)\n");
-    fprintf(stderr, "  -f            follow forks, also trace capabilities in children\n");
-    fprintf(stderr, "  -p <pid>      only trace the given process id\n");
-    fprintf(stderr, "  -t <path>     path to tracefs (default: /sys/kernel/tracing)\n");
-    fprintf(stderr, "  -o <path>     output file to write to (default: stdout if\n");
-    fprintf(stderr, "                tracing an existing process, stderr otherwise)\n");
-    fprintf(stderr, "  [command]     optional command to execute and trace\n");
-    exit(-1);
+    fprintf(out, "Usage: captrace [-h][-s][-f][-v] [-o <out>] [-p <pid>] [-t <tracefs>] [command [args]]\n");
+    fprintf(out, "\n");
+    fprintf(out, "Options:\n");
+    fprintf(out, "  -h            print this help message to stdout and exit\n");
+    fprintf(out, "  -s            only show a summary, when exiting\n");
+    fprintf(out, "  -v            include non-audited capability checks\n");
+    fprintf(out, "                (by default only audited checks are shown)\n");
+    fprintf(out, "  -f            follow forks, also trace capabilities in children\n");
+    fprintf(out, "  -p <pid>      only trace the given process id\n");
+    fprintf(out, "  -t <path>     path to tracefs (default: /sys/kernel/tracing)\n");
+    fprintf(out, "  -o <path>     output file to write to (default: stdout if\n");
+    fprintf(out, "                tracing an existing process, stderr otherwise)\n");
+    fprintf(out, "  [command]     optional command to execute and trace\n");
+    exit(exit_status);
+}
+
+static void print_usage(void)
+{
+    print_help(stderr, -1);
 }
 
 /**
  * Resolve the given capability number to a name.
  * Returns NULL for unknown capabilities.
  */
-const char* resolve_capability_name(cap_num_t cap_num)
+static const char* resolve_capability_name(cap_num_t cap_num)
 {
     if (cap_num >= CAPABILITY_COUNT)
         return NULL;
@@ -108,7 +114,7 @@ const char* resolve_capability_name(cap_num_t cap_num)
 /**
  * Signal handler to break out of the captrace() loop
  */
-void signal_handler(int signum)
+static void signal_handler(int signum)
 {
     if (signum != SIGINT && signum != SIGCHLD)
        return;
@@ -118,7 +124,7 @@ void signal_handler(int signum)
 /**
  * Allocate the given number of bytes, with error handling.
  */
-void* safe_alloc(size_t bytes)
+static void* safe_alloc(size_t bytes)
 {
     void *res = calloc(1, bytes);
     if (res == NULL)
@@ -134,7 +140,7 @@ void* safe_alloc(size_t bytes)
  * executable absolute path. Returns 0 on success,
  * an error code otherwise.
  */
-int get_prog_path_by_pid(uint64_t pid, char *buf, size_t buf_len)
+static int get_prog_path_by_pid(uint64_t pid, char *buf, size_t buf_len)
 {
     char procpath[255] = { 0 };
     snprintf(procpath, sizeof(procpath), "/proc/%" PRIu64 "/exe", pid);
@@ -152,7 +158,7 @@ int get_prog_path_by_pid(uint64_t pid, char *buf, size_t buf_len)
  * formatted string into that file. Returns 0 on success,
  * an error code otherwise.
  */
-int write_tracing(int tracefs_fd, const char *path, const char *format, ...)
+static int write_tracing(int tracefs_fd, const char *path, const char *format, ...)
 {
     int res = 0;
     int tmp_fd = -1;
@@ -193,7 +199,7 @@ cleanup:
  * in a global tracefs file. We clear it before each write, but it's still
  * racy to use it.
  */
-void print_last_tracing_error(int tracefs_fd)
+static void print_last_tracing_error(int tracefs_fd)
 {
     char err_msg[255];
     ssize_t bytes_read;
@@ -217,7 +223,7 @@ void print_last_tracing_error(int tracefs_fd)
  * a summary of all capabilities used is printed at the end. Returns 0 on success,
  * an error code otherwise.
  */
-int setup_tracing(int tracefs_fd, uint64_t target_pid, int follow_forks)
+static int setup_tracing(int tracefs_fd, uint64_t target_pid, int follow_forks)
 {
     int res = 0;
 
@@ -286,7 +292,7 @@ cleanup:
  * If summarize=1, only statistics are printed, at the end.
  * Returns 0 on success, an error code otherwise.
  */
-int process_tracing(int tracefs_fd, int audited_only, int summarize, FILE *out)
+static int process_tracing(int tracefs_fd, int audited_only, int summarize, FILE *out)
 {
     int res = 0;
     int pipe_fd = -1;
@@ -430,7 +436,7 @@ cleanup:
  * (and its overhead) and to reset tracing settings to their defaults.
  * Returns 0 on success, an error code otherwise.
  */
-int cleanup_tracing(int tracefs_fd)
+static int cleanup_tracing(int tracefs_fd)
 {
     int res = 0;
 
@@ -470,10 +476,13 @@ int main(int argc, char* argv[])
     int syncpipe_fd[2] = { 0 };
     FILE *output_file = stdout;
 
-    while ((res = getopt(argc, argv, "+sfvt:o:p:")) != -1)
+    while ((res = getopt(argc, argv, "+hsfvt:o:p:")) != -1)
     {
         switch (res)
         {
+	case 'h':
+	    print_help(stdout, 0);
+	    break;
         case 's':
             summarize = 1;
             break;
