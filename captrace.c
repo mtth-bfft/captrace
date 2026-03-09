@@ -442,7 +442,7 @@ int cleanup_tracing(int tracefs_fd)
         fprintf(stderr, "Error: unable to undefine kprobe, code %d (%s)\n", res, strerror(res));
     res = write_tracing(tracefs_fd, "trace_options", "noevent-fork\n");
     if (res != 0)
-        fprintf(stderr, "Error: unable to undefine kprobe, code %d (%s)\n", res, strerror(res));
+        fprintf(stderr, "Error: unable to unset trace option event-fork, code %d (%s)\n", res, strerror(res));
     res = write_tracing(tracefs_fd, "set_event_pid", "\n");
     if (res != 0)
         fprintf(stderr, "Error: unable to remove trace PID filter, code %d (%s)\n", res, strerror(res));
