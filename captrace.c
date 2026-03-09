@@ -130,24 +130,6 @@ void* safe_alloc(size_t bytes)
 }
 
 /**
- * Resize the given buffer to hold the given size, with
- * error handling.
- */
-void* safe_realloc(void *old, size_t bytes)
-{
-    void *res = NULL;
-    if (old == NULL)
-        return safe_alloc(bytes);
-    res = realloc(old, bytes);
-    if (res == NULL)
-    {
-        fprintf(stderr, "Error: out of memory\n");
-        exit(ENOMEM);
-    }
-    return res;
-}
-
-/**
  * Fills the given buffer with the given process'
  * executable absolute path. Returns 0 on success,
  * an error code otherwise.
