@@ -53,46 +53,31 @@ Download the latest release, or build the tool with any C compiler (and optional
 
 ## How this works
 
-All kernel functions which check for privileges before performing an action end up calling, with a varying number of helpers in between, the same function `cap_capable(struct task_struct*, struct cred*, struct user_namespace*, cap_num)`.
+All kernel functions which check for privileges before performing an action end up calling, with a varying number of helpers in between, the same function `cap_capable(struct cred*, struct user_namespace*, int cap, unsigned int opts)`.
 
-That function is the only place where the user namespace tree is iterated
-up until the root, or until a namespace grants access. Thus we only have
-to monitor it using the built-in function tracepoint functionality.
+That function is the core of how capabilities are implemented: it does the entire work of iterating recursively up the user namespace tree, checking whether the context passed is within that namespace and includes the required capability number in its effective set (or is the creator of the user namespace). That function is logically also where a LSM hook (`security_capable()`) allows LSMs to deny using a capability even if the context theoretically could use it (e.g. via AppArmor's capability rules). Thus, we only have to monitor `cap_capable()`, and we have a pretty strong guarantee that the function will not change without notice and new capability check codepaths will not be added that would bypass `cap_capable()`. Many helpers exist, but they all end up in our function:
 
-Helpers include, at the time of writing:
-
-```
-- bpf_token_capable(struct bpf_token*, cap_num)
-- sockopt_capable(cap_num)
-    `-> capable(cap_num)
-      - nsown_capable(cap_num)
-      - task_ns_capable(struct task_struct*, cap_num)
-      - sockopt_ns_capable(struct user_namespace*, cap_num)
-      - capable_wrt_inode_uidgid(struct mnt_idmap*, struct inode*, cap_num)
-          `-> ns_capable(struct user_namespace*, cap_num)
-            - ns_capable_noaudit(struct user_namespace*, cap_num)
-            - ns_capable_setid(struct user_namespace*, cap_num)
-            - file_ns_capable(struct file*, struct user_namespace*, cap_num)
-                `-> security_capable(struct user_namespace*, struct cred*, cap_num)
-
-- has_capability(struct task_struct*, cap_num)
-- has_ns_capability(struct task_struct*, cap_num)
-    `-> security_real_capable(struct task_struct*, struct user_namespace*, cap_num)
-
-- has_capability_noaudit(struct task_struct*, cap_num)
-    `-> security_real_capable_noaudit(struct task_struct*, struct user_namespace*, cap_num)
-
-- struct net* rtnl_link_get_net_capable(struct sk_buff*, struct net*, struct nlattr*[], cap_num)
-- netlink_net_capable(struct sk_buff*, cap_num)
-- netlink_capable(struct sk_buff*, cap_num)
-    `-> netlink_ns_capable(struct sk_buff*, struct user_namespace*, cap_num)
-
-- sk_net_capable(struct sock *sk, cap_num)
-- sk_capable(struct sock *sk, cap_num)
-    `-> sk_ns_capable(struct sock *sk, struct user_namespace *user_ns, cap_num)
+```mermaid
+graph TD;
+    security_capable --> cap_capable
+    ns_capable_common --> security_capable
+    ns_capable --> ns_capable_common
+    capable --> ns_capable
+    bpf_token_capable --> bpf_ns_capable
+    bpf_ns_capable --> ns_capable
+    sockopt_capable --> capable
+    has_capability --> has_ns_capability
+    has_ns_capability --> security_capable
+    file_ns_capable --> security_capable
+    netlink_capable --> netlink_ns_capable
+    netlink_ns_capable --> file_ns_capable
+    netlink_ns_capable --> ns_capable
+    sk_capable --> sk_ns_capable
+    sk_ns_capable --> file_ns_capable
+    sk_ns_capable --> ns_capable
 ```
 
-The only subtlety is that `cap_capable` changed prototype in v3.3-RC1 with commit #[6a9de49](https://github.com/torvalds/linux/commit/6a9de49115d5ff9871d953af1a5c8249e1585731), and the semantics of its `audit` parameter changed too:
+To monitor `cap_capable()`, the kernel function tracing system is exactly what we want. The only subtlety is that `cap_capable` changed prototype in v3.3-RC1 with commit #[6a9de49](https://github.com/torvalds/linux/commit/6a9de49115d5ff9871d953af1a5c8249e1585731), and the semantics of its `audit` parameter changed too:
 
 ```C
 int cap_capable(struct task_struct *tsk, const struct cred *cred, struct user_namespace *ns, int cap, int audit)
